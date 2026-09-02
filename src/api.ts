@@ -161,7 +161,12 @@ const demoState: DemoState = {
 
 const storageKey = 'upcore-dashboard-demo-state';
 const isDemoMode = import.meta.env.VITE_DEMO_MODE !== 'false';
-const apiBase = String(import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
+const configuredApiBase = String(import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
+const isCloudflarePages = typeof window !== 'undefined' && window.location.hostname.endsWith('.pages.dev');
+// Pages Functions proxy /api requests server-side, so the browser does not need
+// CORS permission from the bot API. This also works when an old Pages build
+// still has VITE_API_BASE_URL set to the Render URL.
+const apiBase = isCloudflarePages ? '/api' : configuredApiBase;
 
 function cloneState(): DemoState {
   if (typeof window !== 'undefined') {
@@ -186,7 +191,11 @@ async function request<T>(path: string, demo: () => T, init?: RequestInit): Prom
     await new Promise((resolve) => window.setTimeout(resolve, 120));
     return demo();
   }
-  const response = await fetch(`${apiBase}${path}`, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers || {}) } });
+  const headers = new Headers(init?.headers);
+  // Adding content-type to a GET makes the browser send a CORS preflight.
+  // Only mutating requests with a JSON body need this header.
+  if (init?.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
+  const response = await fetch(`${apiBase}${path}`, { ...init, headers });
   if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
   return response.json() as Promise<T>;
 }
