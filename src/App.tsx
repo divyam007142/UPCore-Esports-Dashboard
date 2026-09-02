@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
@@ -8,21 +8,28 @@ import {
   BarChart3,
   Bell,
   Bot,
+  CalendarDays,
   Check,
   ChevronDown,
   ChevronRight,
+  CircleCheck,
+  ClipboardList,
+  Database,
   Clock3,
   Command,
   FileText,
   Hash,
   LayoutDashboard,
   LifeBuoy,
+  LogIn,
+  LogOut,
   Menu,
   MessageSquare,
   Plus,
   Radio,
   RefreshCw,
   Search,
+  Server,
   Settings2,
   ShieldAlert,
   SlidersHorizontal,
@@ -39,7 +46,10 @@ import {
   useGetDashboardSummary,
   useGetGuildSettings,
   useGetMemberActivity,
-  useHealthCheck,
+  useAuthSession,
+  useBotHealth,
+  useListStaffActivity,
+  getBotHealthQueryKey,
   useListModerationCases,
   useListTickets,
   useUpdateGuildSettings,
@@ -49,9 +59,16 @@ import {
   getGetDashboardSummaryQueryKey,
   getGetGuildSettingsQueryKey,
   getGetMemberActivityQueryKey,
-  getHealthCheckQueryKey,
   getListModerationCasesQueryKey,
   getListTicketsQueryKey,
+  getStaffActivityQueryKey,
+  getDiscordLoginUrl,
+  getDiscordLogoutUrl,
+  type AuthSession,
+  type ManagedGuild,
+  type StaffActivityCategory,
+  type StaffActivityEvent,
+  type HealthStatus,
   type ActivityEvent,
   type CommandMetric,
   type DashboardSummary,
@@ -68,18 +85,34 @@ import { Link, Route, Router as WouterRouter, Switch, useLocation } from 'wouter
 import type { ReactNode } from 'react';
 
 const queryClient = new QueryClient();
-const guildParams = undefined;
-
 type IconType = typeof LayoutDashboard;
 
 const navItems: { href: string; label: string; icon: IconType; hint: string }[] = [
   { href: '/', label: 'Command center', icon: LayoutDashboard, hint: 'Overview' },
   { href: '/tickets', label: 'Ticket desk', icon: TicketIcon, hint: 'Support queue' },
   { href: '/moderation', label: 'Moderation', icon: ShieldAlert, hint: 'Case review' },
+  { href: '/staff-activity', label: 'Staff activity', icon: ClipboardList, hint: 'Audit timeline' },
   { href: '/analytics', label: 'Analytics', icon: BarChart3, hint: 'Command pulse' },
   { href: '/stats', label: 'Member stats', icon: Users, hint: 'Community pulse' },
+  { href: '/bot-health', label: 'Bot health', icon: Server, hint: 'Gateway status' },
   { href: '/settings', label: 'Guild settings', icon: Settings2, hint: 'Bot controls' },
 ];
+
+type DashboardContextValue = {
+  session: AuthSession;
+  selectedGuild: ManagedGuild;
+  selectGuild: (guildId: string) => void;
+  signOut: () => void;
+  guildParams: { guildId: string };
+};
+
+const DashboardContext = createContext<DashboardContextValue | null>(null);
+
+function useDashboard() {
+  const value = useContext(DashboardContext);
+  if (!value) throw new Error('Dashboard context is unavailable');
+  return value;
+}
 
 function initials(name = 'UP') {
   return name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase();
@@ -102,6 +135,14 @@ function fullDate(value?: string) {
   if (!value) return '—';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date);
+}
+
+function formatUptime(seconds?: number) {
+  if (seconds === undefined || seconds === null) return '—';
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${days}d ${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m`;
 }
 
 function QueryLoading({ rows = 3 }: { rows?: number }) {
@@ -131,8 +172,9 @@ function EmptyState({ icon: Icon, title, detail }: { icon: IconType; title: stri
   );
 }
 
-function TopBar({ onMenu, guildName = 'UPCore Esports' }: { onMenu: () => void; guildName?: string }) {
+function TopBar({ onMenu }: { onMenu: () => void }) {
   const [, setLocation] = useLocation();
+  const { session, selectedGuild, selectGuild, signOut } = useDashboard();
   return (
     <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-border/70 bg-background/90 px-4 backdrop-blur-xl md:px-8">
       <div className="flex items-center gap-3">
@@ -141,9 +183,10 @@ function TopBar({ onMenu, guildName = 'UPCore Esports' }: { onMenu: () => void; 
         <div className="flex items-center gap-2 sm:hidden"><span className="font-black tracking-tight text-foreground">UP<span className="text-primary">.</span></span><span className="mono-font text-[10px] uppercase tracking-[.15em] text-muted-foreground">Live desk</span></div>
       </div>
       <div className="flex items-center gap-2.5">
-        <div className="hidden items-center gap-2 rounded-sm border border-border bg-card px-3 py-2 lg:flex"><span className="flex size-2 rounded-full bg-primary pulse-dot" /><span className="mono-font text-[10px] uppercase tracking-[.13em] text-muted-foreground">{guildName}</span><ChevronDown className="size-3.5 text-muted-foreground" /></div>
+        <div className="hidden items-center gap-2 rounded-sm border border-border bg-card px-2 py-1.5 lg:flex"><span className="flex size-2 rounded-full bg-primary pulse-dot" /><select aria-label="Select server" value={selectedGuild.id} onChange={(event) => selectGuild(event.target.value)} className="max-w-44 bg-transparent px-1 py-0.5 mono-font text-[10px] uppercase tracking-[.13em] text-muted-foreground outline-none">{session.guilds.map((guild) => <option key={guild.id} value={guild.id}>{guild.name}</option>)}</select><ChevronDown className="size-3.5 text-muted-foreground" /></div>
         <button data-testid="button-notifications" className="relative rounded-sm border border-border bg-card p-2 text-muted-foreground transition-colors hover:text-foreground"><Bell className="size-4" /><span className="absolute -right-1 -top-1 size-2 rounded-full bg-accent ring-2 ring-background" /></button>
-        <button data-testid="button-user-menu" onClick={() => setLocation('/settings')} className="flex items-center gap-2 rounded-sm border border-border bg-card py-1.5 pl-1.5 pr-2 transition-colors hover:border-primary/50"><span className="flex size-7 items-center justify-center rounded-sm bg-primary font-bold text-primary-foreground">{initials('UPCore')}</span><span className="hidden text-xs font-semibold sm:inline">UPCore Staff</span></button>
+        <button data-testid="button-user-menu" onClick={() => setLocation('/settings')} className="flex items-center gap-2 rounded-sm border border-border bg-card py-1.5 pl-1.5 pr-2 transition-colors hover:border-primary/50"><span className="flex size-7 items-center justify-center rounded-sm bg-primary font-bold text-primary-foreground">{initials(session.user.globalName ?? session.user.username)}</span><span className="hidden text-xs font-semibold sm:inline">{session.user.globalName ?? session.user.username}</span></button>
+        <button aria-label="Sign out" title="Sign out" onClick={signOut} className="rounded-sm border border-border bg-card p-2 text-muted-foreground transition-colors hover:border-destructive/50 hover:text-destructive"><LogOut className="size-4" /></button>
       </div>
     </header>
   );
@@ -193,7 +236,8 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 function Shell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  return <div className="min-h-[100dvh] bg-background"><Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} /><div className="min-h-[100dvh] md:pl-[252px]"><TopBar onMenu={() => setMenuOpen(true)} /><main className="mx-auto max-w-[1560px] p-4 md:p-8">{children}</main></div></div>;
+  const { selectedGuild } = useDashboard();
+  return <div className="min-h-[100dvh] bg-background"><Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} /><div className="min-h-[100dvh] md:pl-[252px]"><TopBar onMenu={() => setMenuOpen(true)} /><main className="mx-auto max-w-[1560px] p-4 md:p-8"><div className="mb-5 flex items-center gap-2 text-[10px] text-muted-foreground"><Server className="size-3.5 text-primary" /><span className="mono-font uppercase tracking-[.13em]">Managing</span><span className="font-semibold text-foreground">{selectedGuild.name}</span></div>{children}</main></div></div>;
 }
 
 function PageHeader({ eyebrow, title, detail, action }: { eyebrow: string; title: ReactNode; detail: string; action?: ReactNode }) {
@@ -217,22 +261,24 @@ function EventRow({ event }: { event: ActivityEvent }) {
 }
 
 function Home() {
+  const { guildParams } = useDashboard();
   const summaryQuery = useGetDashboardSummary(guildParams, { query: { queryKey: getGetDashboardSummaryQueryKey(guildParams), refetchInterval: 30000 } });
-  const activityQuery = useGetDashboardActivity({ limit: 8 }, { query: { queryKey: getGetDashboardActivityQueryKey({ limit: 8 }), refetchInterval: 30000 } });
-  const healthQuery = useHealthCheck({ query: { queryKey: getHealthCheckQueryKey(), refetchInterval: 30000 } });
+  const activityQuery = useGetDashboardActivity({ ...guildParams, limit: 8 }, { query: { queryKey: getGetDashboardActivityQueryKey({ ...guildParams, limit: 8 }), refetchInterval: 30000 } });
+  const healthQuery = useBotHealth(guildParams, { query: { queryKey: getBotHealthQueryKey(guildParams), refetchInterval: 30000 } });
   const summary = summaryQuery.data as DashboardSummary | undefined;
   const activity = (activityQuery.data as ActivityEvent[] | undefined) ?? [];
   const guildName = summary?.guildName ?? 'UPCore Esports';
   return <Shell><PageHeader eyebrow="Live operations / 00:00 UTC" title={<>Command<br /><span className="text-primary">center.</span></>} detail={`A live pulse of ${guildName}. Keep the queue moving, catch the edge cases, and stay ahead of your community.`} action={<div className="flex items-center gap-2 rounded-sm border border-primary/20 bg-primary/5 px-3 py-2.5"><span className="flex size-2 rounded-full bg-primary pulse-dot" /><span className="mono-font text-[10px] uppercase tracking-[.14em] text-primary">Live connection</span><span className="text-[10px] text-muted-foreground">{healthQuery.data?.status ?? 'checking'}</span></div>} />
     <div className="space-y-5">
       {summaryQuery.isLoading ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><QueryLoading rows={4} /></div> : summaryQuery.isError ? <QueryError onRetry={() => summaryQuery.refetch()} label="Summary metrics could not be loaded." /> : <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 animate-rise"><StatCard label="Members online" value={summary?.onlineMembers ?? '—'} meta={`${summary?.memberCount ?? '—'} total members`} icon={Users} /><StatCard label="Open tickets" value={summary?.openTickets ?? '—'} meta={summary?.deltaLabel ?? 'Current queue'} icon={TicketIcon} tone="orange" /><StatCard label="Unresolved cases" value={summary?.unresolvedCases ?? '—'} meta="Needs staff review" icon={ShieldAlert} tone="red" /><StatCard label="Command success" value={summary ? `${summary.commandSuccessRate}%` : '—'} meta={`Uptime ${summary?.uptime ?? '—'}`} icon={Zap} tone="blue" /></div>}
-      <div className="grid gap-5 xl:grid-cols-[1.4fr_.8fr]">
+       <div className="grid gap-5 xl:grid-cols-[1.4fr_.8fr]">
         <Panel title="Recent activity" eyebrow="Signal feed" action={<Link href="/tickets" data-testid="link-view-all-activity" className="mono-font flex items-center gap-1 text-[9px] uppercase tracking-[.15em] text-muted-foreground hover:text-primary">View desk <ChevronRight className="size-3" /></Link>}>
           {activityQuery.isLoading ? <div className="p-5"><QueryLoading rows={5} /></div> : activityQuery.isError ? <div className="p-5"><QueryError onRetry={() => activityQuery.refetch()} /></div> : activity.length ? activity.map((event) => <EventRow key={event.id} event={event} />) : <EmptyState icon={Activity} title="No activity in the signal feed" detail="New ticket, member, and moderation events will land here." />}
         </Panel>
         <Panel title="Operational readout" eyebrow="At a glance">
           <div className="space-y-1 p-5">
-            <ReadoutRow label="Gateway status" value={healthQuery.data?.status ?? (healthQuery.isLoading ? 'checking' : 'unknown')} tone={healthQuery.data?.status === 'ok' ? 'good' : 'neutral'} />
+             <ReadoutRow label="Gateway status" value={healthQuery.data?.status ?? (healthQuery.isLoading ? 'checking' : 'unknown')} tone={healthQuery.data?.status === 'ok' ? 'good' : 'neutral'} />
+             <ReadoutRow label="Bot uptime" value={formatUptime(healthQuery.data?.uptimeSeconds)} tone="good" />
             <ReadoutRow label="Members online" value={summary ? `${summary.onlineMembers} / ${summary.memberCount}` : '—'} />
             <ReadoutRow label="Tickets needing reply" value={summary?.openTickets ?? '—'} tone="warn" />
             <ReadoutRow label="Active cases" value={summary?.unresolvedCases ?? '—'} tone="alert" />
@@ -255,19 +301,20 @@ function ReadoutRow({ label, value, tone = 'neutral' }: { label: string; value: 
 }
 
 function TicketDesk() {
+  const { guildParams } = useDashboard();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<'all' | TicketStatus>('all');
-  const params = useMemo(() => ({ ...(search ? { search } : {}), ...(status !== 'all' ? { status } : {}) }), [search, status]);
+  const params = useMemo(() => ({ ...guildParams, ...(search ? { search } : {}), ...(status !== 'all' ? { status } : {}) }), [guildParams, search, status]);
   const query = useListTickets(params, { query: { queryKey: getListTicketsQueryKey(params) } });
   const update = useUpdateTicket();
   const client = useQueryClient();
   const [notice, setNotice] = useState('');
   const tickets = (query.data as Ticket[] | undefined) ?? [];
   const changeStatus = (ticket: Ticket, nextStatus: TicketStatus) => {
-    update.mutate({ ticketId: ticket.id, data: { status: nextStatus } }, { onSuccess: () => { setNotice(`Ticket ${ticket.ticketId} moved to ${nextStatus}.`); client.invalidateQueries({ queryKey: getListTicketsQueryKey(params) }); } });
+    update.mutate({ ticketId: ticket.id, guildId: guildParams.guildId, data: { status: nextStatus } }, { onSuccess: () => { setNotice(`Ticket ${ticket.ticketId} moved to ${nextStatus}.`); client.invalidateQueries({ queryKey: getListTicketsQueryKey(params) }); } });
   };
   const changeAssignee = (ticket: Ticket, assignee: string) => {
-    update.mutate({ ticketId: ticket.id, data: { assignee: assignee.trim() || null } }, { onSuccess: () => { setNotice(`${ticket.ticketId} assignment updated.`); client.invalidateQueries({ queryKey: getListTicketsQueryKey(params) }); } });
+    update.mutate({ ticketId: ticket.id, guildId: guildParams.guildId, data: { assignee: assignee.trim() || null } }, { onSuccess: () => { setNotice(`${ticket.ticketId} assignment updated.`); client.invalidateQueries({ queryKey: getListTicketsQueryKey(params) }); } });
   };
   return <Shell><PageHeader eyebrow="Support operations / Queue" title={<>Ticket<br /><span className="text-primary">desk.</span></>} detail="One queue, every conversation. Search the community's open loops and move them to resolution." action={<div className="flex items-center gap-2 text-xs text-muted-foreground"><span className="flex size-2 rounded-full bg-accent" /><span className="mono-font text-[10px] uppercase tracking-[.15em]">Queue sync live</span></div>} />
     <div className="space-y-5">
@@ -287,8 +334,10 @@ function TicketRow({ ticket, pending, onStatus, onAssignee }: { ticket: Ticket; 
 }
 
 function Moderation() {
-  const query = useListModerationCases({ limit: 50 }, { query: { queryKey: getListModerationCasesQueryKey({ limit: 50 }) } });
-  const create = useCreateModerationCase();
+  const { guildParams } = useDashboard();
+  const moderationParams = { ...guildParams, limit: 50 };
+  const query = useListModerationCases(moderationParams, { query: { queryKey: getListModerationCasesQueryKey(moderationParams) } });
+  const create = useCreateModerationCase(guildParams.guildId);
   const client = useQueryClient();
   const [modal, setModal] = useState(false);
   const [action, setAction] = useState<ModerationCaseInputAction>('warn');
@@ -299,11 +348,11 @@ function Moderation() {
   const submit = (event: { preventDefault: () => void }) => {
     event.preventDefault();
     if (!user.trim() || !reason.trim()) return;
-    create.mutate({ data: { action, user: user.trim(), reason: reason.trim() } }, { onSuccess: (created) => { setModal(false); setUser(''); setReason(''); setNotice(`Case #${created.caseNumber} recorded.`); client.invalidateQueries({ queryKey: getListModerationCasesQueryKey({ limit: 50 }) }); } });
+    create.mutate({ data: { action, user: user.trim(), reason: reason.trim() } }, { onSuccess: (created) => { setModal(false); setUser(''); setReason(''); setNotice(`Case #${created.caseNumber} recorded.`); client.invalidateQueries({ queryKey: getListModerationCasesQueryKey(moderationParams) }); } });
   };
   return <Shell><PageHeader eyebrow="Trust & safety / Casebook" title={<>Moderation<br /><span className="text-primary">watch.</span></>} detail="Review the paper trail, document decisive action, and keep every call accountable." action={<button data-testid="button-new-case" onClick={() => setModal(true)} className="flex items-center justify-center gap-2 rounded-sm bg-primary px-4 py-3 text-xs font-extrabold text-primary-foreground transition hover:brightness-105"><Plus className="size-4" /> New case</button>} />
     <div className="space-y-5">
-      {notice && <div className="flex items-center justify-between rounded-sm border border-primary/20 bg-primary/10 px-4 py-3 text-xs text-primary" data-testid="status-case-created"><span className="flex items-center gap-2"><Check className="size-4" />{notice}</span><button data-testid="button-dismiss-case-notice" onClick={() => setNotice('')}><X className="size-4" /></button></div>}
+       {notice && <div className="flex items-center justify-between rounded-sm border border-primary/20 bg-primary/10 px-4 py-3 text-xs text-primary" data-testid="status-case-created"><span className="flex items-center gap-2"><Check className="size-4" />{notice}</span><button data-testid="button-dismiss-case-notice" onClick={() => setNotice('')}><X className="size-4" /></button></div>}
       <div className="grid gap-3 sm:grid-cols-3"><StatCard label="Cases this month" value={cases.length} meta="Across all actions" icon={FileText} /><StatCard label="Active restrictions" value={cases.filter((item) => item.status === 'active' && ['mute', 'ban'].includes(item.action)).length} meta="Requires attention" icon={ShieldAlert} tone="red" /><StatCard label="Record health" value="Clear" meta="No overdue reviews" icon={Check} tone="blue" /></div>
       <Panel title="Case log" eyebrow="Latest decisions" action={<span className="mono-font text-[9px] uppercase tracking-[.15em] text-muted-foreground">Newest first</span>}>
         {query.isLoading ? <div className="p-5"><QueryLoading rows={6} /></div> : query.isError ? <div className="p-5"><QueryError onRetry={() => query.refetch()} label="Moderation records could not be loaded." /></div> : cases.length === 0 ? <EmptyState icon={ShieldAlert} title="The casebook is quiet" detail="New moderation records will appear here as staff document action." /> : <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left"><thead><tr className="border-b border-card-border text-[9px] uppercase tracking-[.16em] text-muted-foreground"><th className="px-5 py-3 font-medium">Case</th><th className="px-5 py-3 font-medium">Member</th><th className="px-5 py-3 font-medium">Action</th><th className="px-5 py-3 font-medium">Reason</th><th className="px-5 py-3 font-medium">Moderator</th><th className="px-5 py-3 font-medium">Status</th></tr></thead><tbody>{cases.map((item) => <ModerationRow key={item.id} item={item} />)}</tbody></table></div>}
@@ -319,8 +368,9 @@ function ModerationRow({ item }: { item: ModerationCase }) {
 }
 
 function Settings() {
+  const { guildParams } = useDashboard();
   const query = useGetGuildSettings(guildParams, { query: { queryKey: getGetGuildSettingsQueryKey(guildParams) } });
-  const update = useUpdateGuildSettings();
+  const update = useUpdateGuildSettings(guildParams.guildId);
   const client = useQueryClient();
   const [draft, setDraft] = useState<Partial<GuildSettings>>({});
   const [notice, setNotice] = useState('');
@@ -344,6 +394,7 @@ function ToggleRow({ label, detail, enabled, pending, onChange, testId }: { labe
 }
 
 function Analytics() {
+  const { guildParams } = useDashboard();
   const query = useGetCommandAnalytics(guildParams, { query: { queryKey: getGetCommandAnalyticsQueryKey(guildParams) } });
   const metrics = (query.data as CommandMetric[] | undefined) ?? [];
   const totalUses = metrics.reduce((sum, item) => sum + item.uses, 0);
@@ -357,6 +408,7 @@ function Analytics() {
 }
 
 function Stats() {
+  const { guildParams } = useDashboard();
   const query = useGetMemberActivity(guildParams, { query: { queryKey: getGetMemberActivityQueryKey(guildParams), refetchInterval: 60_000 } });
   const stats = query.data;
   const leaderboard = stats?.leaderboard ?? [];
@@ -400,8 +452,67 @@ function MetricBar({ metric, maxUses }: { metric: CommandMetric; maxUses: number
   return <div data-testid={`row-command-${metric.command.replace('/', '')}`}><div className="mb-2 flex items-center justify-between gap-4"><div className="flex items-center gap-3"><span className="flex size-8 items-center justify-center rounded-sm bg-secondary text-primary"><Command className="size-4" /></span><div><p className="mono-font text-xs font-medium">{metric.command}</p><p className="mt-1 text-[10px] text-muted-foreground">{metric.successRate}% success</p></div></div><div className="text-right"><p className="mono-font text-xs">{metric.uses.toLocaleString()}</p><p className={`mt-1 flex items-center justify-end gap-1 text-[10px] ${positive ? 'text-primary' : 'text-destructive'}`}>{positive ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}{Math.abs(metric.trend)}%</p></div></div><div className="h-2 overflow-hidden rounded-full bg-secondary"><div className="h-full rounded-full bg-primary transition-all duration-700" style={{ width: `${Math.max(3, (metric.uses / maxUses) * 100)}%` }} /></div></div>;
 }
 
+function StaffActivityRow({ event }: { event: StaffActivityEvent }) {
+  const icon = event.category === 'moderation' ? ShieldAlert : event.category === 'tickets' ? TicketIcon : event.category === 'settings' ? Settings2 : Bot;
+  const Icon = icon;
+  const tone = event.category === 'moderation' ? 'text-destructive bg-destructive/10' : event.category === 'tickets' ? 'text-accent bg-accent/10' : event.category === 'settings' ? 'text-chart-3 bg-chart-3/10' : 'text-primary bg-primary/10';
+  return <div className="flex gap-3 border-b border-card-border/70 px-5 py-4 last:border-0" data-testid={`row-staff-activity-${event.id}`}><div className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-sm ${tone}`}><Icon className="size-4" /></div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold">{event.title}</p><p className="mono-font mt-1 text-[9px] uppercase tracking-[.12em] text-muted-foreground">{event.category} · {event.action}</p></div><span className="mono-font shrink-0 text-[9px] text-muted-foreground">{fullDate(event.occurredAt)}</span></div><p className="mt-2 text-[11px] text-muted-foreground">{event.detail}</p><p className="mt-2 text-[10px] text-muted-foreground/65">by <span className="font-semibold text-foreground/75">{event.actor.username}</span></p></div></div>;
+}
+
+function StaffActivity() {
+  const { guildParams } = useDashboard();
+  const [category, setCategory] = useState<'all' | StaffActivityCategory>('all');
+  const [staffId, setStaffId] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const params = useMemo(() => ({ ...guildParams, category, ...(staffId ? { staffId } : {}), ...(from ? { from } : {}), ...(to ? { to } : {}), limit: 100 }), [guildParams, category, staffId, from, to]);
+  const query = useListStaffActivity(params, { query: { queryKey: getStaffActivityQueryKey(params) } });
+  const events = (query.data as StaffActivityEvent[] | undefined) ?? [];
+  const staff = Array.from(new Map(events.map((event) => [event.actor.id, event.actor])).values());
+  return <Shell><PageHeader eyebrow="Accountability / Audit trail" title={<>Staff<br /><span className="text-primary">activity.</span></>} detail="One complete timeline for every staff action across moderation, tickets, settings, and bot operations." action={<div className="flex items-center gap-2 rounded-sm border border-border bg-card px-3 py-2.5"><ClipboardList className="size-4 text-primary" /><span className="mono-font text-[10px] uppercase tracking-[.15em] text-muted-foreground">Audit history</span></div>} />
+    <div className="space-y-5">
+      <div className="grid gap-3 rounded-sm border border-card-border bg-card p-3 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_1fr_auto]">
+        <label className="space-y-2"><span className="mono-font block text-[9px] uppercase tracking-[.16em] text-muted-foreground">Activity type</span><select data-testid="select-staff-activity-category" value={category} onChange={(event) => setCategory(event.target.value as 'all' | StaffActivityCategory)} className="h-10 w-full rounded-sm border border-input bg-background px-3 text-xs font-semibold capitalize outline-none focus:border-primary"><option value="all">All activity</option><option value="moderation">Moderation</option><option value="tickets">Tickets</option><option value="settings">Settings</option><option value="bot">Bot actions</option></select></label>
+        <label className="space-y-2"><span className="mono-font block text-[9px] uppercase tracking-[.16em] text-muted-foreground">Staff member</span><select data-testid="select-staff-activity-member" value={staffId} onChange={(event) => setStaffId(event.target.value)} className="h-10 w-full rounded-sm border border-input bg-background px-3 text-xs font-semibold outline-none focus:border-primary"><option value="">Everyone</option>{staff.map((member) => <option key={member.id} value={member.id}>{member.username}</option>)}</select></label>
+        <label className="space-y-2"><span className="mono-font flex items-center gap-1 text-[9px] uppercase tracking-[.16em] text-muted-foreground"><CalendarDays className="size-3" /> From</span><input data-testid="input-staff-activity-from" type="date" value={from} onChange={(event) => setFrom(event.target.value)} className="h-10 w-full rounded-sm border border-input bg-background px-3 text-xs outline-none focus:border-primary" /></label>
+        <label className="space-y-2"><span className="mono-font flex items-center gap-1 text-[9px] uppercase tracking-[.16em] text-muted-foreground"><CalendarDays className="size-3" /> To</span><input data-testid="input-staff-activity-to" type="date" value={to} onChange={(event) => setTo(event.target.value)} className="h-10 w-full rounded-sm border border-input bg-background px-3 text-xs outline-none focus:border-primary" /></label>
+        <button data-testid="button-refresh-staff-activity" onClick={() => query.refetch()} className="mt-auto flex h-10 items-center justify-center gap-2 rounded-sm border border-input px-3 text-xs font-bold text-muted-foreground transition hover:border-primary/50 hover:text-foreground"><RefreshCw className={`size-3.5 ${query.isFetching ? 'animate-spin' : ''}`} /> Refresh</button>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3"><StatCard label="Events in view" value={events.length} meta="After active filters" icon={ClipboardList} /><StatCard label="Moderation actions" value={events.filter((event) => event.category === 'moderation').length} meta="Warnings, mutes, kicks, bans" icon={ShieldAlert} tone="red" /><StatCard label="Staff members" value={staff.length} meta="Contributors in this view" icon={Users} tone="blue" /></div>
+      <Panel title="Complete staff timeline" eyebrow="Newest first" action={<span className="mono-font text-[9px] uppercase tracking-[.15em] text-muted-foreground">Immutable audit feed</span>}>
+        {query.isLoading ? <div className="p-5"><QueryLoading rows={7} /></div> : query.isError ? <div className="p-5"><QueryError onRetry={() => query.refetch()} label="Staff activity could not be loaded." /></div> : events.length ? events.map((event) => <StaffActivityRow key={event.id} event={event} />) : <EmptyState icon={ClipboardList} title="No staff activity matches" detail="Try clearing a filter or choose a wider date range." />}
+      </Panel>
+    </div>
+  </Shell>;
+}
+
+function BotHealth() {
+  const { guildParams } = useDashboard();
+  const query = useBotHealth(guildParams, { query: { queryKey: getBotHealthQueryKey(guildParams), refetchInterval: 30000 } });
+  const health = query.data as HealthStatus | undefined;
+  const statusGood = health?.status === 'ok' || health?.status === 'healthy';
+  return <Shell><PageHeader eyebrow="Infrastructure / Discord gateway" title={<>Bot<br /><span className="text-primary">health.</span></>} detail="Monitor gateway readiness, uptime, database connectivity, and the heartbeat behind this server." action={<button onClick={() => query.refetch()} className="flex items-center gap-2 rounded-sm border border-border bg-card px-3 py-2.5 text-xs font-bold text-muted-foreground hover:border-primary/50 hover:text-foreground"><RefreshCw className={`size-3.5 ${query.isFetching ? 'animate-spin' : ''}`} /> Refresh</button>} />
+    <div className="space-y-5">
+      {query.isLoading ? <QueryLoading rows={5} /> : query.isError ? <QueryError onRetry={() => query.refetch()} label="Bot health could not be loaded." /> : <>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><StatCard label="Gateway" value={statusGood ? 'Online' : health?.status ?? 'Unknown'} meta={health?.botReady === false ? 'Bot is not ready' : 'Connection responding'} icon={Radio} tone={statusGood ? 'lime' : 'red'} /><StatCard label="Bot uptime" value={formatUptime(health?.uptimeSeconds)} meta="Since last process restart" icon={Clock3} tone="blue" /><StatCard label="API latency" value={health?.latencyMs !== undefined ? `${health.latencyMs}ms` : '—'} meta="Latest health response" icon={Zap} tone="orange" /><StatCard label="Database" value={health?.database ?? 'Unknown'} meta="Persistence connection" icon={Database} tone={health?.database === 'connected' ? 'lime' : 'red'} /></div>
+        <div className="grid gap-5 lg:grid-cols-[1.1fr_.9fr]"><Panel title="Service readout" eyebrow="Live diagnostics"><div className="space-y-1 p-5"><ReadoutRow label="Bot identity" value={health?.botUser ?? '—'} /><ReadoutRow label="Selected guild" value={health?.guildId ?? guildParams.guildId} /><ReadoutRow label="Gateway status" value={health?.status ?? '—'} tone={statusGood ? 'good' : 'alert'} /><ReadoutRow label="Bot readiness" value={health?.botReady === false ? 'not ready' : 'ready'} tone={health?.botReady === false ? 'alert' : 'good'} /><ReadoutRow label="Last heartbeat" value={fullDate(health?.lastHeartbeatAt)} /></div></Panel><Panel title="Operational guidance" eyebrow="Keep it healthy"><div className="space-y-4 p-5 text-xs leading-5 text-muted-foreground"><p className="flex gap-3"><CircleCheck className="mt-0.5 size-4 shrink-0 text-primary" />The API should report health without requiring a dashboard session so uptime checks can monitor it.</p><p className="flex gap-3"><Database className="mt-0.5 size-4 shrink-0 text-chart-3" />Database status reflects the same connection used for tickets, moderation cases, and the audit timeline.</p><p className="flex gap-3"><Clock3 className="mt-0.5 size-4 shrink-0 text-accent" />Refreshes automatically every 30 seconds while this page is open.</p></div></Panel></div>
+      </>}
+    </div>
+  </Shell>;
+}
+
+function LoginScreen({ onRetry, setupError }: { onRetry?: () => void; setupError?: Error }) {
+  const [oauthError] = useState(() => typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('error') : null);
+  const login = () => { window.location.href = getDiscordLoginUrl(); };
+  return <div className="grid min-h-[100dvh] place-items-center bg-background p-5"><div className="w-full max-w-lg rounded-sm border border-card-border bg-card p-6 shadow-2xl md:p-9"><div className="mb-10 flex items-center gap-3"><span className="flex size-11 items-center justify-center rounded-sm bg-primary text-xl font-black text-primary-foreground">U<span className="text-accent">+</span></span><div><p className="text-lg font-extrabold tracking-[-.04em]">UPCORE</p><p className="mono-font text-[9px] uppercase tracking-[.24em] text-primary">Esports / Ops</p></div></div><p className="mono-font text-[10px] uppercase tracking-[.22em] text-primary">Staff access / Secure gateway</p><h1 className="display-font mt-3 text-5xl font-bold uppercase leading-[.88]">Control<br /><span className="text-primary">starts here.</span></h1><p className="mt-5 text-sm leading-6 text-muted-foreground">Sign in with Discord to see every server where you have staff access. The selected server scopes tickets, moderation, settings, and audit history.</p>{oauthError && <div className="mt-5 rounded-sm border border-destructive/25 bg-destructive/10 p-3 text-xs text-destructive-foreground">Discord sign-in was not completed. Please try again.</div>}{setupError && <div className="mt-5 rounded-sm border border-accent/25 bg-accent/10 p-3 text-xs text-muted-foreground"><p className="font-bold text-accent">API login route is not configured yet.</p><p className="mt-1">Add GET /auth/me and GET /auth/discord to the Render API, then redeploy it. The exact contract is in docs/DISCORD_AUTH_API.md.</p>{onRetry && <button onClick={onRetry} className="mt-3 font-semibold text-foreground underline">Check again</button>}</div>}<button data-testid="button-discord-login" onClick={login} className="mt-7 flex h-12 w-full items-center justify-center gap-3 rounded-sm bg-[#5865F2] text-sm font-extrabold text-white transition hover:brightness-110"><LogIn className="size-4" /> Continue with Discord</button><div className="mt-6 flex items-start gap-3 border-t border-card-border pt-5 text-[11px] leading-5 text-muted-foreground"><ShieldAlert className="mt-0.5 size-4 shrink-0 text-primary" /><span>Only servers returned by Discord where you have Manage Guild or Administrator access are shown. The bot must also be present to load server data.</span></div></div></div>;
+}
+
+function AccessDenied({ session }: { session: AuthSession }) {
+  return <div className="grid min-h-[100dvh] place-items-center bg-background p-5"><div className="w-full max-w-lg rounded-sm border border-card-border bg-card p-8 text-center"><Server className="mx-auto size-8 text-accent" /><h1 className="display-font mt-5 text-4xl font-bold uppercase">No managed servers.</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">Discord signed you in as {session.user.globalName ?? session.user.username}, but no server matched the staff access rules or has the bot installed.</p><button onClick={() => { window.location.href = getDiscordLogoutUrl(); }} className="mt-6 rounded-sm border border-border px-4 py-3 text-xs font-bold text-muted-foreground hover:border-primary/50 hover:text-foreground"><LogOut className="mr-2 inline size-3.5" /> Sign out</button></div></div>;
+}
+
 function Router() {
-  return <RoutedErrorBoundary><Switch><Route path="/" component={Home} /><Route path="/tickets" component={TicketDesk} /><Route path="/moderation" component={Moderation} /><Route path="/settings" component={Settings} /><Route path="/analytics" component={Analytics} /><Route path="/stats" component={Stats} /><Route component={NotFound} /></Switch></RoutedErrorBoundary>;
+  return <RoutedErrorBoundary><Switch><Route path="/" component={Home} /><Route path="/tickets" component={TicketDesk} /><Route path="/moderation" component={Moderation} /><Route path="/staff-activity" component={StaffActivity} /><Route path="/bot-health" component={BotHealth} /><Route path="/settings" component={Settings} /><Route path="/analytics" component={Analytics} /><Route path="/stats" component={Stats} /><Route component={NotFound} /></Switch></RoutedErrorBoundary>;
 }
 
 function RoutedErrorBoundary({ children }: { children: ReactNode }) {
@@ -409,8 +520,28 @@ function RoutedErrorBoundary({ children }: { children: ReactNode }) {
   return <ErrorBoundary resetKey={location}>{children}</ErrorBoundary>;
 }
 
+function DashboardRoot() {
+  const authQuery = useAuthSession();
+  const [selectedGuildId, setSelectedGuildId] = useState(() => typeof window === 'undefined' ? '' : window.localStorage.getItem('upcore-selected-guild') ?? '');
+  useEffect(() => {
+    const guilds = authQuery.data?.guilds ?? [];
+    if (guilds.length && !guilds.some((guild) => guild.id === selectedGuildId)) {
+      setSelectedGuildId(guilds[0].id);
+      window.localStorage.setItem('upcore-selected-guild', guilds[0].id);
+    }
+  }, [authQuery.data, selectedGuildId]);
+  if (authQuery.isLoading) return <div className="grid min-h-[100dvh] place-items-center bg-background"><div className="mono-font text-[10px] uppercase tracking-[.2em] text-primary">Checking staff access…</div></div>;
+  if (authQuery.isError) return <LoginScreen onRetry={() => authQuery.refetch()} setupError={authQuery.error} />;
+  if (!authQuery.data) return <LoginScreen />;
+  if (!authQuery.data.guilds.length) return <AccessDenied session={authQuery.data} />;
+  const selectedGuild = authQuery.data.guilds.find((guild) => guild.id === selectedGuildId) ?? authQuery.data.guilds[0];
+  const selectGuild = (guildId: string) => { setSelectedGuildId(guildId); window.localStorage.setItem('upcore-selected-guild', guildId); };
+  const signOut = () => { window.location.href = `${getDiscordLogoutUrl()}?returnTo=${encodeURIComponent(window.location.origin)}`; };
+  return <DashboardContext.Provider value={{ session: authQuery.data, selectedGuild, selectGuild, signOut, guildParams: { guildId: selectedGuild.id } }}><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}><Router /></WouterRouter></DashboardContext.Provider>;
+}
+
 function App() {
-  return <QueryClientProvider client={queryClient}><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}><Router /></WouterRouter></QueryClientProvider>;
+  return <QueryClientProvider client={queryClient}><DashboardRoot /></QueryClientProvider>;
 }
 
 export default App;
