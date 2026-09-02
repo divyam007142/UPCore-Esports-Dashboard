@@ -8,7 +8,45 @@ import {
 export type TicketStatus = 'open' | 'pending' | 'escalated' | 'closed';
 export type ModerationCaseInputAction = 'warn' | 'mute' | 'kick' | 'ban' | 'unban' | 'note';
 
-export type HealthStatus = { status: string };
+export type HealthStatus = {
+  status: string;
+  botReady?: boolean;
+  botUser?: string;
+  guildId?: string;
+  uptimeSeconds?: number;
+  database?: string;
+  latencyMs?: number;
+  lastHeartbeatAt?: string;
+};
+export type AuthUser = {
+  id: string;
+  username: string;
+  globalName?: string | null;
+  avatarUrl?: string | null;
+};
+export type ManagedGuild = {
+  id: string;
+  name: string;
+  iconUrl?: string | null;
+  permissions?: string;
+  isBotPresent?: boolean;
+};
+export type AuthSession = {
+  user: AuthUser;
+  guilds: ManagedGuild[];
+};
+export type StaffActivityCategory = 'moderation' | 'tickets' | 'settings' | 'bot';
+export type StaffActivityEvent = {
+  id: string;
+  category: StaffActivityCategory;
+  action: string;
+  title: string;
+  detail: string;
+  actor: AuthUser | { id: string; username: string };
+  occurredAt: string;
+  guildId?: string;
+  metadata?: Record<string, unknown>;
+};
 export type DashboardSummary = {
   guildName: string;
   memberCount: number;
@@ -96,6 +134,7 @@ export type MemberActivityResponse = {
 type DemoState = {
   summary: DashboardSummary;
   activity: ActivityEvent[];
+  staffActivity: StaffActivityEvent[];
   tickets: Ticket[];
   cases: ModerationCase[];
   settings: GuildSettings;
@@ -120,6 +159,15 @@ const demoState: DemoState = {
     { id: 'activity-3', type: 'member', title: 'New member joined', detail: 'Welcome to UPCore Esports HQ', actor: 'Ishita Nair', occurredAt: '2026-09-02T07:54:00.000Z', severity: 'positive' },
     { id: 'activity-4', type: 'bot', title: 'Daily backup completed', detail: 'All systems operational', actor: 'UPCore Bot', occurredAt: '2026-09-02T06:00:00.000Z', severity: 'positive' },
     { id: 'activity-5', type: 'settings', title: 'Automod rule updated', detail: 'Added 3 blocked phrases', actor: 'Arjun Verma', occurredAt: '2026-09-01T21:13:00.000Z', severity: 'neutral' },
+  ],
+  staffActivity: [
+    { id: 'staff-1', category: 'moderation', action: 'mute', title: 'Member muted', detail: 'Rohan Das · 10 minutes', actor: { id: 'staff-riya', username: 'Riya Mehta' }, occurredAt: '2026-09-02T08:06:00.000Z' },
+    { id: 'staff-2', category: 'tickets', action: 'claim', title: 'Ticket claimed', detail: 'Ticket #1048 · Club Wars SESA registration question', actor: { id: 'staff-riya', username: 'Riya Mehta' }, occurredAt: '2026-09-02T07:58:00.000Z' },
+    { id: 'staff-3', category: 'settings', action: 'update', title: 'Guild settings changed', detail: 'Translation assist enabled', actor: { id: 'staff-arjun', username: 'Arjun Verma' }, occurredAt: '2026-09-01T21:13:00.000Z' },
+    { id: 'staff-4', category: 'tickets', action: 'escalate', title: 'Ticket escalated', detail: 'Ticket #1046 · Partnership deck follow-up', actor: { id: 'staff-ananya', username: 'Ananya Rao' }, occurredAt: '2026-09-01T20:42:00.000Z' },
+    { id: 'staff-5', category: 'moderation', action: 'note', title: 'Case note added', detail: 'Approved for Club Wars SESA private qualifier', actor: { id: 'staff-ananya', username: 'Ananya Rao' }, occurredAt: '2026-09-01T18:20:00.000Z' },
+    { id: 'staff-6', category: 'bot', action: 'backup', title: 'Daily backup completed', detail: 'All systems operational', actor: { id: 'bot', username: 'UPCore Bot' }, occurredAt: '2026-09-01T06:00:00.000Z' },
+    { id: 'staff-7', category: 'tickets', action: 'close', title: 'Ticket closed', detail: 'Ticket #1044 · Feedback on the new support panel', actor: { id: 'staff-arjun', username: 'Arjun Verma' }, occurredAt: '2026-09-01T05:18:00.000Z' },
   ],
   tickets: [
     { id: 'ticket-1048', ticketId: '#1048', category: 'tournament', subject: 'Club Wars SESA registration question', requester: 'Aarav Sharma', requesterTag: 'aarav.s', assignee: 'Riya Mehta', status: 'open', openedAt: '2026-09-02T08:42:00.000Z', lastActivity: '2026-09-02T09:18:00.000Z', priority: 'high', messageCount: 12 },
@@ -160,13 +208,20 @@ const demoState: DemoState = {
 };
 
 const storageKey = 'upcore-dashboard-demo-state';
-const isDemoMode = import.meta.env.VITE_DEMO_MODE !== 'false';
+export const isDemoMode = import.meta.env.VITE_DEMO_MODE !== 'false';
 const configuredApiBase = String(import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 const isCloudflarePages = typeof window !== 'undefined' && window.location.hostname.endsWith('.pages.dev');
 // Pages Functions proxy /api requests server-side, so the browser does not need
 // CORS permission from the bot API. This also works when an old Pages build
 // still has VITE_API_BASE_URL set to the Render URL.
 const apiBase = isCloudflarePages ? '/api' : configuredApiBase;
+
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
 
 function cloneState(): DemoState {
   if (typeof window !== 'undefined') {
@@ -195,9 +250,28 @@ async function request<T>(path: string, demo: () => T, init?: RequestInit): Prom
   // Adding content-type to a GET makes the browser send a CORS preflight.
   // Only mutating requests with a JSON body need this header.
   if (init?.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
-  const response = await fetch(`${apiBase}${path}`, { ...init, headers });
-  if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
+  const response = await fetch(`${apiBase}${path}`, { credentials: 'include', ...init, headers });
+  if (!response.ok) throw new ApiError(`API request failed with status ${response.status}`, response.status);
   return response.json() as Promise<T>;
+}
+
+function withQuery(path: string, params?: Record<string, string | number | undefined>) {
+  if (!params) return path;
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') query.set(key, String(value));
+  });
+  const suffix = query.toString();
+  return suffix ? `${path}${path.includes('?') ? '&' : '?'}${suffix}` : path;
+}
+
+export function getDiscordLoginUrl() {
+  const returnTo = typeof window === 'undefined' ? '/' : `${window.location.origin}${window.location.pathname}`;
+  return `${apiBase}/auth/discord?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
+export function getDiscordLogoutUrl() {
+  return `${apiBase}/auth/logout`;
 }
 
 type HookOptions = { query?: { queryKey?: readonly unknown[]; refetchInterval?: number } };
@@ -214,23 +288,45 @@ export const getListModerationCasesQueryKey = (params?: unknown) => ['moderation
 export const getGetGuildSettingsQueryKey = (params?: unknown) => ['guild-settings', params];
 export const getGetCommandAnalyticsQueryKey = (params?: unknown) => ['command-analytics', params];
 export const getGetMemberActivityQueryKey = (params?: unknown) => ['member-activity', params];
+export const getAuthSessionQueryKey = () => ['auth-session'];
+export const getStaffActivityQueryKey = (params?: unknown) => ['staff-activity', params];
+export const getBotHealthQueryKey = (params?: unknown) => ['bot-health', params];
 
 export function useHealthCheck(options?: HookOptions): UseQueryResult<HealthStatus, Error> {
   return useQuery({ ...queryOptions(options, getHealthCheckQueryKey()), queryFn: () => request('/healthz', () => ({ status: 'ok' })) });
 }
 
+export function useAuthSession(): UseQueryResult<AuthSession | null, Error> {
+  return useQuery({
+    queryKey: getAuthSessionQueryKey(),
+    retry: false,
+    queryFn: async () => {
+      try {
+        return await request<AuthSession>('/auth/me', () => ({
+          user: { id: 'demo-staff', username: 'UPCore Staff', globalName: 'UPCore Staff', avatarUrl: null },
+          guilds: [{ id: 'demo-guild', name: 'UPCore Esports HQ', iconUrl: null, isBotPresent: true }],
+        }));
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) return null;
+        throw error;
+      }
+    },
+  });
+}
+
 export function useGetDashboardSummary(_params?: unknown, options?: HookOptions): UseQueryResult<DashboardSummary, Error> {
-  return useQuery({ ...queryOptions(options, getGetDashboardSummaryQueryKey()), queryFn: () => request('/dashboard/summary', () => cloneState().summary) });
+  const params = _params as { guildId?: string } | undefined;
+  return useQuery({ ...queryOptions(options, getGetDashboardSummaryQueryKey(_params)), queryFn: () => request(withQuery('/dashboard/summary', params), () => cloneState().summary) });
 }
 
-export function useGetDashboardActivity(params?: { limit?: number }, options?: HookOptions): UseQueryResult<ActivityEvent[], Error> {
-  return useQuery({ ...queryOptions(options, getGetDashboardActivityQueryKey(params)), queryFn: () => request(`/dashboard/activity?limit=${params?.limit ?? 8}`, () => cloneState().activity.slice(0, params?.limit ?? 8)) });
+export function useGetDashboardActivity(params?: { guildId?: string; limit?: number }, options?: HookOptions): UseQueryResult<ActivityEvent[], Error> {
+  return useQuery({ ...queryOptions(options, getGetDashboardActivityQueryKey(params)), queryFn: () => request(withQuery('/dashboard/activity', params), () => cloneState().activity.slice(0, params?.limit ?? 8)) });
 }
 
-export function useListTickets(params?: { status?: TicketStatus; search?: string }, options?: HookOptions): UseQueryResult<Ticket[], Error> {
+export function useListTickets(params?: { guildId?: string; status?: TicketStatus; search?: string }, options?: HookOptions): UseQueryResult<Ticket[], Error> {
   return useQuery({
     ...queryOptions(options, getListTicketsQueryKey(params)),
-    queryFn: () => request('/tickets', () => {
+    queryFn: () => request(withQuery('/tickets', params), () => {
       const state = cloneState();
       const needle = params?.search?.toLowerCase();
       return state.tickets.filter((ticket) => (!params?.status || ticket.status === params.status) && (!needle || [ticket.ticketId, ticket.subject, ticket.requester, ticket.requesterTag].some((value) => String(value ?? '').toLowerCase().includes(needle))));
@@ -238,9 +334,9 @@ export function useListTickets(params?: { status?: TicketStatus; search?: string
   });
 }
 
-export function useUpdateTicket(): UseMutationResult<Ticket, Error, { ticketId: string; data: { status?: TicketStatus; assignee?: string | null } }> {
+export function useUpdateTicket(): UseMutationResult<Ticket, Error, { ticketId: string; guildId?: string; data: { status?: TicketStatus; assignee?: string | null } }> {
   return useMutation({
-    mutationFn: ({ ticketId, data }) => request(`/tickets/${ticketId}`, () => {
+    mutationFn: ({ ticketId, guildId, data }) => request(withQuery(`/tickets/${ticketId}`, { guildId }), () => {
       const state = cloneState();
       const ticket = state.tickets.find((item) => item.id === ticketId || item.ticketId === ticketId);
       if (!ticket) throw new Error('Ticket not found');
@@ -252,13 +348,13 @@ export function useUpdateTicket(): UseMutationResult<Ticket, Error, { ticketId: 
   });
 }
 
-export function useListModerationCases(params?: { limit?: number }, options?: HookOptions): UseQueryResult<ModerationCase[], Error> {
-  return useQuery({ ...queryOptions(options, getListModerationCasesQueryKey(params)), queryFn: () => request('/moderation/cases', () => cloneState().cases.slice(0, params?.limit ?? 10)) });
+export function useListModerationCases(params?: { guildId?: string; limit?: number }, options?: HookOptions): UseQueryResult<ModerationCase[], Error> {
+  return useQuery({ ...queryOptions(options, getListModerationCasesQueryKey(params)), queryFn: () => request(withQuery('/moderation/cases', params), () => cloneState().cases.slice(0, params?.limit ?? 10)) });
 }
 
-export function useCreateModerationCase(): UseMutationResult<ModerationCase, Error, { data: ModerationCaseInput }> {
+export function useCreateModerationCase(guildId?: string): UseMutationResult<ModerationCase, Error, { data: ModerationCaseInput }> {
   return useMutation({
-    mutationFn: ({ data }) => request('/moderation/cases', () => {
+    mutationFn: ({ data }) => request(withQuery('/moderation/cases', { guildId }), () => {
       const state = cloneState();
       const caseNumber = Math.max(...state.cases.map((item) => item.caseNumber), 0) + 1;
       const created: ModerationCase = { id: `case-${caseNumber}`, caseNumber, ...data, userTag: data.user, moderator: 'Dashboard operator', createdAt: new Date().toISOString(), status: 'active' };
@@ -271,12 +367,13 @@ export function useCreateModerationCase(): UseMutationResult<ModerationCase, Err
 }
 
 export function useGetGuildSettings(_params?: unknown, options?: HookOptions): UseQueryResult<GuildSettings, Error> {
-  return useQuery({ ...queryOptions(options, getGetGuildSettingsQueryKey()), queryFn: () => request('/guild/settings', () => cloneState().settings) });
+  const params = _params as { guildId?: string } | undefined;
+  return useQuery({ ...queryOptions(options, getGetGuildSettingsQueryKey(_params)), queryFn: () => request(withQuery('/guild/settings', params), () => cloneState().settings) });
 }
 
-export function useUpdateGuildSettings(): UseMutationResult<GuildSettings, Error, { data: Partial<GuildSettings> }> {
+export function useUpdateGuildSettings(guildId?: string): UseMutationResult<GuildSettings, Error, { data: Partial<GuildSettings> }> {
   return useMutation({
-    mutationFn: ({ data }) => request('/guild/settings', () => {
+    mutationFn: ({ data }) => request(withQuery('/guild/settings', { guildId }), () => {
       const state = cloneState();
       state.settings = { ...state.settings, ...data };
       saveState(state);
@@ -286,9 +383,34 @@ export function useUpdateGuildSettings(): UseMutationResult<GuildSettings, Error
 }
 
 export function useGetCommandAnalytics(_params?: unknown, options?: HookOptions): UseQueryResult<CommandMetric[], Error> {
-  return useQuery({ ...queryOptions(options, getGetCommandAnalyticsQueryKey()), queryFn: () => request('/analytics/commands', () => cloneState().analytics) });
+  const params = _params as { guildId?: string } | undefined;
+  return useQuery({ ...queryOptions(options, getGetCommandAnalyticsQueryKey(_params)), queryFn: () => request(withQuery('/analytics/commands', params), () => cloneState().analytics) });
 }
 
 export function useGetMemberActivity(_params?: unknown, options?: HookOptions): UseQueryResult<MemberActivityResponse, Error> {
-  return useQuery({ ...queryOptions(options, getGetMemberActivityQueryKey()), queryFn: () => request('/members/activity', () => cloneState().memberActivity) });
+  const params = _params as { guildId?: string } | undefined;
+  return useQuery({ ...queryOptions(options, getGetMemberActivityQueryKey(_params)), queryFn: () => request(withQuery('/members/activity', params), () => cloneState().memberActivity) });
+}
+
+export function useListStaffActivity(params?: { guildId?: string; category?: 'all' | StaffActivityCategory; staffId?: string; from?: string; to?: string; limit?: number }, options?: HookOptions): UseQueryResult<StaffActivityEvent[], Error> {
+  return useQuery({
+    ...queryOptions(options, getStaffActivityQueryKey(params)),
+    queryFn: () => request(withQuery('/staff-activity', params), () => {
+      const state = cloneState();
+      return state.staffActivity
+        .filter((event) => !params?.category || params.category === 'all' || event.category === params.category)
+        .filter((event) => !params?.staffId || event.actor.id === params.staffId)
+        .filter((event) => !params?.from || event.occurredAt >= `${params.from}T00:00:00.000Z`)
+        .filter((event) => !params?.to || event.occurredAt <= `${params.to}T23:59:59.999Z`)
+        .slice(0, params?.limit ?? 50);
+    }),
+  });
+}
+
+export function useBotHealth(_params?: unknown, options?: HookOptions): UseQueryResult<HealthStatus, Error> {
+  const params = _params as { guildId?: string } | undefined;
+  return useQuery({
+    ...queryOptions(options, getBotHealthQueryKey(_params)),
+    queryFn: () => request(withQuery('/healthz', params), () => ({ status: 'ok', botReady: true, botUser: 'UPCore Bot', uptimeSeconds: 14 * 86400 + 6 * 3600 + 22 * 60, database: 'connected' })),
+  });
 }
