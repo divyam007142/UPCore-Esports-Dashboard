@@ -64,6 +64,7 @@ import {
   getStaffActivityQueryKey,
   getDiscordLoginUrl,
   getDiscordLogoutUrl,
+  ApiError,
   type AuthSession,
   type ManagedGuild,
   type StaffActivityCategory,
@@ -501,10 +502,99 @@ function BotHealth() {
   </Shell>;
 }
 
+function StaffAccessLoading() {
+  return (
+    <div className="access-screen relative isolate grid min-h-[100dvh] place-items-center overflow-hidden bg-background px-5 py-10" role="status" aria-live="polite">
+      <div className="access-grid pointer-events-none absolute inset-0 opacity-50" />
+      <div className="access-orbit access-orbit-one pointer-events-none absolute -right-24 -top-28 size-80 rounded-full border border-primary/10" />
+      <div className="access-orbit access-orbit-two pointer-events-none absolute -bottom-40 -left-32 size-96 rounded-full border border-accent/10" />
+      <div className="relative w-full max-w-md">
+        <div className="mb-8 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="flex size-10 items-center justify-center rounded-sm bg-primary text-lg font-black text-primary-foreground shadow-[0_0_28px_hsl(var(--primary)/.22)]">
+              U<span className="text-accent">+</span>
+            </span>
+            <div>
+              <p className="text-base font-extrabold tracking-[-.04em]">UPCORE</p>
+              <p className="mono-font mt-0.5 text-[8px] uppercase tracking-[.24em] text-primary">Esports / Ops</p>
+            </div>
+          </div>
+          <span className="mono-font rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-[9px] uppercase tracking-[.16em] text-primary">Secure gateway</span>
+        </div>
+        <div className="mb-6 flex items-center gap-2">
+          <span className="access-pulse size-2 rounded-full bg-primary" />
+          <span className="mono-font text-[10px] uppercase tracking-[.2em] text-primary/80">Access check / in progress</span>
+        </div>
+        <h1 className="display-font text-6xl font-bold uppercase leading-[.84] tracking-[-.025em] sm:text-7xl">
+          Checking
+          <br />
+          <span className="text-primary">staff access.</span>
+        </h1>
+        <p className="mt-6 max-w-sm text-sm leading-6 text-muted-foreground">
+          Verifying your Discord session and available server permissions.
+        </p>
+        <div className="mt-8 rounded-sm border border-card-border bg-card/75 p-4 shadow-2xl backdrop-blur-xl">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="flex size-9 items-center justify-center rounded-sm bg-secondary text-primary">
+                <ShieldAlert className="size-4" />
+              </span>
+              <div>
+                <p className="text-xs font-bold text-foreground">Authenticating workspace</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">This usually takes a moment.</p>
+              </div>
+            </div>
+            <RefreshCw className="access-spin size-4 shrink-0 text-primary" />
+          </div>
+          <div className="mt-4 grid grid-cols-3 gap-1.5" aria-hidden="true">
+            <span className="access-bar h-1 rounded-full bg-primary" />
+            <span className="access-bar access-bar-two h-1 rounded-full bg-primary/70" />
+            <span className="access-bar access-bar-three h-1 rounded-full bg-primary/40" />
+          </div>
+        </div>
+        <p className="mono-font mt-5 text-center text-[9px] uppercase tracking-[.16em] text-muted-foreground/60">Private staff dashboard · UPCore Esports</p>
+      </div>
+    </div>
+  );
+}
+
 function LoginScreen({ onRetry, setupError }: { onRetry?: () => void; setupError?: Error }) {
   const [oauthError] = useState(() => typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('error') : null);
   const login = () => { window.location.href = getDiscordLoginUrl(); };
-  return <div className="grid min-h-[100dvh] place-items-center bg-background p-5"><div className="w-full max-w-lg rounded-sm border border-card-border bg-card p-6 shadow-2xl md:p-9"><div className="mb-10 flex items-center gap-3"><span className="flex size-11 items-center justify-center rounded-sm bg-primary text-xl font-black text-primary-foreground">U<span className="text-accent">+</span></span><div><p className="text-lg font-extrabold tracking-[-.04em]">UPCORE</p><p className="mono-font text-[9px] uppercase tracking-[.24em] text-primary">Esports / Ops</p></div></div><p className="mono-font text-[10px] uppercase tracking-[.22em] text-primary">Staff access / Secure gateway</p><h1 className="display-font mt-3 text-5xl font-bold uppercase leading-[.88]">Control<br /><span className="text-primary">starts here.</span></h1><p className="mt-5 text-sm leading-6 text-muted-foreground">Sign in with Discord to see every server where you have staff access. The selected server scopes tickets, moderation, settings, and audit history.</p>{oauthError && <div className="mt-5 rounded-sm border border-destructive/25 bg-destructive/10 p-3 text-xs text-destructive-foreground">Discord sign-in was not completed. Please try again.</div>}{setupError && <div className="mt-5 rounded-sm border border-accent/25 bg-accent/10 p-3 text-xs text-muted-foreground"><p className="font-bold text-accent">API login route is not configured yet.</p><p className="mt-1">Add GET /auth/me and GET /auth/discord to the Render API, then redeploy it. The exact contract is in docs/DISCORD_AUTH_API.md.</p>{onRetry && <button onClick={onRetry} className="mt-3 font-semibold text-foreground underline">Check again</button>}</div>}<button data-testid="button-discord-login" onClick={login} className="mt-7 flex h-12 w-full items-center justify-center gap-3 rounded-sm bg-[#5865F2] text-sm font-extrabold text-white transition hover:brightness-110"><LogIn className="size-4" /> Continue with Discord</button><div className="mt-6 flex items-start gap-3 border-t border-card-border pt-5 text-[11px] leading-5 text-muted-foreground"><ShieldAlert className="mt-0.5 size-4 shrink-0 text-primary" /><span>Only servers returned by Discord where you have Manage Guild or Administrator access are shown. The bot must also be present to load server data.</span></div></div></div>;
+  const authRouteUnavailable = setupError instanceof ApiError && setupError.status === 404;
+  return (
+    <div className="access-screen relative isolate grid min-h-[100dvh] place-items-center overflow-hidden bg-background px-5 py-10">
+      <div className="access-grid pointer-events-none absolute inset-0 opacity-50" />
+      <div className="relative w-full max-w-lg">
+        <div className="mb-7 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="flex size-10 items-center justify-center rounded-sm bg-primary text-lg font-black text-primary-foreground shadow-[0_0_28px_hsl(var(--primary)/.22)]">U<span className="text-accent">+</span></span>
+            <div><p className="text-base font-extrabold tracking-[-.04em]">UPCORE</p><p className="mono-font mt-0.5 text-[8px] uppercase tracking-[.24em] text-primary">Esports / Ops</p></div>
+          </div>
+          <span className={`mono-font rounded-full border px-3 py-1.5 text-[9px] uppercase tracking-[.16em] ${setupError ? 'border-accent/25 bg-accent/5 text-accent' : 'border-primary/20 bg-primary/5 text-primary'}`}>{setupError ? 'Gateway paused' : 'Staff only'}</span>
+        </div>
+        <div className="rounded-sm border border-card-border bg-card/85 p-6 shadow-2xl backdrop-blur-xl md:p-9">
+          <p className="mono-font text-[10px] uppercase tracking-[.22em] text-primary">Staff access / Secure gateway</p>
+          <h1 className="display-font mt-4 text-6xl font-bold uppercase leading-[.84] tracking-[-.02em]">Control<br /><span className="text-primary">starts here.</span></h1>
+          <p className="mt-6 text-sm leading-6 text-muted-foreground">Sign in with Discord to see every server where you have staff access. Your selected server scopes tickets, moderation, settings, and audit history.</p>
+          {oauthError && <div className="mt-6 flex gap-3 rounded-sm border border-destructive/25 bg-destructive/10 p-4 text-xs leading-5 text-destructive-foreground"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><span>Discord sign-in was not completed. Nothing changed on your account—please try again.</span></div>}
+          {setupError && <div className="mt-6 rounded-sm border border-accent/25 bg-accent/10 p-4">
+            <div className="flex gap-3">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-sm bg-accent/15 text-accent"><Server className="size-4" /></span>
+              <div>
+                <p className="text-sm font-bold text-accent">{authRouteUnavailable ? 'Access service is not connected yet.' : 'Couldn’t verify staff access.'}</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">{authRouteUnavailable ? 'The dashboard is online, but the Render API has not exposed its Discord session routes. Sign-in will be available once the API is redeployed with them.' : 'The access service did not respond. Please try again in a moment.'}</p>
+              </div>
+            </div>
+            {onRetry && <button type="button" onClick={onRetry} className="mt-4 inline-flex items-center gap-2 rounded-sm border border-accent/30 px-3 py-2 text-xs font-bold text-foreground transition hover:border-accent hover:bg-accent/10"><RefreshCw className="size-3.5" /> Check connection again</button>}
+          </div>}
+          {!setupError && <button data-testid="button-discord-login" type="button" onClick={login} className="mt-7 flex h-12 w-full items-center justify-center gap-3 rounded-sm bg-[#5865F2] text-sm font-extrabold text-white shadow-[0_10px_30px_rgba(88,101,242,.22)] transition hover:brightness-110"><LogIn className="size-4" /> Continue with Discord</button>}
+          <div className="mt-7 flex items-start gap-3 border-t border-card-border pt-5 text-[11px] leading-5 text-muted-foreground"><ShieldAlert className="mt-0.5 size-4 shrink-0 text-primary" /><span>Only Discord servers where you have Manage Guild or Administrator access are shown. The bot must also be present to load server data.</span></div>
+        </div>
+        <p className="mono-font mt-5 text-center text-[9px] uppercase tracking-[.16em] text-muted-foreground/60">Private staff dashboard · UPCore Esports</p>
+      </div>
+    </div>
+  );
 }
 
 function AccessDenied({ session }: { session: AuthSession }) {
@@ -530,7 +620,7 @@ function DashboardRoot() {
       window.localStorage.setItem('upcore-selected-guild', guilds[0].id);
     }
   }, [authQuery.data, selectedGuildId]);
-  if (authQuery.isLoading) return <div className="grid min-h-[100dvh] place-items-center bg-background"><div className="mono-font text-[10px] uppercase tracking-[.2em] text-primary">Checking staff access…</div></div>;
+  if (authQuery.isLoading) return <StaffAccessLoading />;
   if (authQuery.isError) return <LoginScreen onRetry={() => authQuery.refetch()} setupError={authQuery.error} />;
   if (!authQuery.data) return <LoginScreen />;
   if (!authQuery.data.guilds.length) return <AccessDenied session={authQuery.data} />;
