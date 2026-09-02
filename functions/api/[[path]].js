@@ -1,4 +1,4 @@
-const API_ORIGIN = 'https://upcore-api-proxy.onrender.com';
+const API_ORIGIN = 'https://upcore-api-proxy.onrender.com/api/auth/discord';
 
 export async function onRequest(context) {
   const incomingUrl = new URL(context.request.url);
