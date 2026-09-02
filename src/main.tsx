@@ -1,7 +1,18 @@
 import { createRoot } from 'react-dom/client';
-import App from './App';
-import './index.css';
 
-createRoot(document.getElementById('root')!).render(
-  <App />,
-);
+const root = document.getElementById('root');
+
+if (root) {
+  root.innerHTML = `
+    <div style="
+      color: white;
+      background: #111;
+      min-height: 100vh;
+      padding: 40px;
+      font-family: Arial;
+      font-size: 24px;
+    ">
+      MAIN.TSX IS RUNNING
+    </div>
+  `;
+}
