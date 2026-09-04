@@ -573,6 +573,7 @@ function LoginScreen({ onRetry, setupError }: { onRetry?: () => void; setupError
   const [oauthError] = useState(() => typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('error') : null);
   const login = () => { window.location.href = getDiscordLoginUrl(); };
   const authRouteUnavailable = setupError instanceof ApiError && setupError.status === 404;
+  const authRequestTimedOut = setupError instanceof ApiError && setupError.status === 408;
   return (
     <div className="access-screen relative isolate grid min-h-[100dvh] place-items-center overflow-hidden bg-background px-5 py-10">
       <div className="access-grid pointer-events-none absolute inset-0 opacity-50" />
@@ -593,10 +594,11 @@ function LoginScreen({ onRetry, setupError }: { onRetry?: () => void; setupError
             <div className="flex gap-3">
               <span className="flex size-8 shrink-0 items-center justify-center rounded-sm bg-accent/15 text-accent"><Server className="size-4" /></span>
               <div>
-                <p className="text-sm font-bold text-accent">{authRouteUnavailable ? 'Access service is not connected yet.' : 'Couldn’t verify staff access.'}</p>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">{authRouteUnavailable ? 'The dashboard is online, but the Render API has not exposed its Discord session routes. Sign-in will be available once the API is redeployed with them.' : 'The access service did not respond. Please try again in a moment.'}</p>
+                <p className="text-sm font-bold text-accent">{authRouteUnavailable ? 'Access service is not connected yet.' : authRequestTimedOut ? 'Access service timed out.' : 'Couldn’t verify staff access.'}</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">{authRouteUnavailable ? 'The dashboard is online, but the Render API has not exposed its Discord session routes. Sign-in will be available once the API is redeployed with them.' : authRequestTimedOut ? 'The dashboard could not reach the API in time. Check the API deployment and try again.' : 'The access service returned an unexpected response. Please try again in a moment.'}</p>
               </div>
             </div>
+            {setupError?.message && <p className="mt-3 rounded-sm bg-background/60 px-3 py-2 font-mono text-[10px] leading-5 text-muted-foreground">Diagnostic: {setupError.message}</p>}
             {onRetry && <button type="button" onClick={onRetry} className="mt-4 inline-flex items-center gap-2 rounded-sm border border-accent/30 px-3 py-2 text-xs font-bold text-foreground transition hover:border-accent hover:bg-accent/10"><RefreshCw className="size-3.5" /> Check connection again</button>}
           </div>}
           {!setupError && <button data-testid="button-discord-login" type="button" onClick={login} className="mt-7 flex h-12 w-full items-center justify-center gap-3 rounded-sm bg-[#5865F2] text-sm font-extrabold text-white shadow-[0_10px_30px_rgba(88,101,242,.22)] transition hover:brightness-110"><LogIn className="size-4" /> Continue with Discord</button>}
