@@ -45,12 +45,14 @@ function DefaultFallback({ error, resetError }: ErrorFallbackProps) {
           Your Discord session is still safe. Reload the dashboard or try the
           current view again.
         </p>
-        {/* Dev only: messages can carry API responses and other internals. */}
-        {import.meta.env.DEV ? (
-          <pre className="mt-4 overflow-x-auto rounded bg-[#0d1018] p-3 text-left text-xs text-[#ff8760]">
+        <details className="mt-4 text-left">
+          <summary className="cursor-pointer text-xs font-semibold text-[#9aa6b2]">
+            Show technical details
+          </summary>
+          <pre className="mt-2 max-h-40 overflow-auto rounded bg-[#0d1018] p-3 text-xs text-[#ff8760]">
             {error.message || String(error)}
           </pre>
-        ) : null}
+        </details>
         <button
           type="button"
           onClick={resetError}
