@@ -1,4 +1,4 @@
-const API_ORIGIN = 'https://upcore-api-proxy.onrender.com/api/auth/discord';
+const API_ORIGIN = 'https://upcore-api-proxy.onrender.com';
 
 export async function onRequest(context) {
   const incomingUrl = new URL(context.request.url);
@@ -23,9 +23,21 @@ export async function onRequest(context) {
   const responseHeaders = new Headers(response.headers);
   // The API is on Render while the browser is on Pages. Strip the upstream
   // Domain attribute so the session cookie belongs to the Pages origin.
-  const setCookie = response.headers.get('set-cookie');
-  if (setCookie) {
-    responseHeaders.set('set-cookie', setCookie.replace(/;\s*Domain=[^;]+/gi, ''));
+  const setCookies =
+    typeof response.headers.getSetCookie === 'function'
+      ? response.headers.getSetCookie()
+      : response.headers.get('set-cookie')
+        ? [response.headers.get('set-cookie')]
+        : [];
+
+  if (setCookies.length) {
+    responseHeaders.delete('set-cookie');
+    for (const setCookie of setCookies) {
+      responseHeaders.append(
+        'set-cookie',
+        setCookie.replace(/;\s*Domain=[^;]+/gi, ''),
+      );
+    }
   }
   return new Response(response.body, {
     status: response.status,
