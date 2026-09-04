@@ -215,6 +215,7 @@ const isCloudflarePages = typeof window !== 'undefined' && window.location.hostn
 // CORS permission from the bot API. This also works when an old Pages build
 // still has VITE_API_BASE_URL set to the Render URL.
 const apiBase = isCloudflarePages ? '/api' : configuredApiBase;
+const requestTimeoutMs = 15000;
 
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number) {
@@ -250,9 +251,25 @@ async function request<T>(path: string, demo: () => T, init?: RequestInit): Prom
   // Adding content-type to a GET makes the browser send a CORS preflight.
   // Only mutating requests with a JSON body need this header.
   if (init?.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
-  const response = await fetch(`${apiBase}${path}`, { credentials: 'include', ...init, headers });
-  if (!response.ok) throw new ApiError(`API request failed with status ${response.status}`, response.status);
-  return response.json() as Promise<T>;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const response = await fetch(`${apiBase}${path}`, {
+      credentials: 'include',
+      ...init,
+      headers,
+      signal: init?.signal ?? controller.signal,
+    });
+    if (!response.ok) throw new ApiError(`API request failed with status ${response.status}`, response.status);
+    return response.json() as Promise<T>;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError' && !init?.signal?.aborted) {
+      throw new ApiError(`The API did not respond within ${requestTimeoutMs / 1000} seconds`, 408);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 function withQuery(path: string, params?: Record<string, string | number | undefined>) {
@@ -302,10 +319,20 @@ export function useAuthSession(): UseQueryResult<AuthSession | null, Error> {
     retry: false,
     queryFn: async () => {
       try {
-        return await request<AuthSession>('/auth/me', () => ({
+        const session = await request<AuthSession>('/auth/me', () => ({
           user: { id: 'demo-staff', username: 'UPCore Staff', globalName: 'UPCore Staff', avatarUrl: null },
           guilds: [{ id: 'demo-guild', name: 'UPCore Esports HQ', iconUrl: null, isBotPresent: true }],
         }));
+        if (
+          !session ||
+          typeof session !== 'object' ||
+          !session.user ||
+          typeof session.user !== 'object' ||
+          !Array.isArray(session.guilds)
+        ) {
+          throw new ApiError('The API returned an invalid authentication response', 502);
+        }
+        return session;
       } catch (error) {
         if (error instanceof ApiError && error.status === 401) return null;
         throw error;
