@@ -37,25 +37,24 @@ function toError(value: unknown): Error {
 
 function DefaultFallback({ error, resetError }: ErrorFallbackProps) {
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gray-50 p-6">
-      <div className="max-w-lg w-full text-center">
-        <h1 className="text-xl font-semibold text-gray-900">
-          Something went wrong
-        </h1>
-        <p className="mt-2 text-sm text-gray-600">
-          This part of the app hit an error. The rest of the app is still
-          running.
+    <div className="grid min-h-[100dvh] w-full place-items-center bg-[#0d1018] p-6 text-[#eef3f6]">
+      <div className="w-full max-w-lg rounded-sm border border-[#2c3544] bg-[#151b27] p-8 text-center shadow-2xl">
+        <p className="font-mono text-[10px] uppercase tracking-[.2em] text-[#d7ff3f]">UPCore / Recovery</p>
+        <h1 className="mt-4 text-2xl font-bold">The dashboard hit a render error</h1>
+        <p className="mt-2 text-sm leading-6 text-[#9aa6b2]">
+          Your Discord session is still safe. Reload the dashboard or try the
+          current view again.
         </p>
         {/* Dev only: messages can carry API responses and other internals. */}
         {import.meta.env.DEV ? (
-          <pre className="mt-4 overflow-x-auto rounded bg-gray-100 p-3 text-left text-xs text-gray-800">
+          <pre className="mt-4 overflow-x-auto rounded bg-[#0d1018] p-3 text-left text-xs text-[#ff8760]">
             {error.message || String(error)}
           </pre>
         ) : null}
         <button
           type="button"
           onClick={resetError}
-          className="mt-4 rounded bg-gray-900 px-4 py-2 text-sm text-white hover:bg-gray-700"
+          className="mt-5 rounded bg-[#d7ff3f] px-4 py-2 text-sm font-bold text-[#0d1018] hover:brightness-110"
         >
           Try again
         </button>
