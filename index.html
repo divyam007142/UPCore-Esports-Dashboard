@@ -25,17 +25,26 @@
     </div>
     <script>
       (function () {
-        var showStartupError = function () {
+        var showStartupError = function (message) {
           var state = document.getElementById('boot-state');
           if (!state) return;
-          state.innerHTML = 'Dashboard could not start. Please refresh this page.';
+          state.innerHTML = message || 'Dashboard could not start. Please refresh this page.';
           state.style.color = '#ff8760';
           state.style.textAlign = 'center';
           state.style.padding = '24px';
         };
-        // Only report a true module/bootstrap failure. React removes this
-        // element once it mounts; API errors are rendered by the app itself.
-        window.setTimeout(showStartupError, 10000);
+        // React removes this element once it mounts. If module/bootstrap
+        // execution fails before React can render its own recovery UI, leave a
+        // visible error instead of a blank dark page.
+        window.addEventListener('error', function () {
+          showStartupError('Dashboard script failed to load. Please refresh this page.');
+        });
+        window.addEventListener('unhandledrejection', function () {
+          showStartupError('Dashboard encountered an unexpected startup error. Please refresh this page.');
+        });
+        window.setTimeout(function () {
+          showStartupError('Dashboard could not start. Please refresh this page.');
+        }, 10000);
       })();
     </script>
     <script type="module" src="./src/main.tsx"></script>
