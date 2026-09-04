@@ -633,7 +633,10 @@ function DashboardRoot() {
       window.localStorage.setItem('upcore-selected-guild', guilds[0].id);
     }
   }, [authQuery.data, selectedGuildId]);
-  if (authQuery.isLoading) return <StaffAccessLoading />;
+  // Render from valid session data even if React Query is still performing a
+  // background fetch. Keeping the whole app behind isLoading can leave the
+  // access screen visible when the session response has already arrived.
+  if (authQuery.isLoading && !authQuery.data) return <StaffAccessLoading />;
   if (authQuery.isError) return <LoginScreen onRetry={() => authQuery.refetch()} setupError={authQuery.error} />;
   if (!authQuery.data) return <LoginScreen />;
   if (!authQuery.data.guilds.length) return <AccessDenied session={authQuery.data} />;
