@@ -116,7 +116,18 @@ function useDashboard() {
 }
 
 function initials(name = 'UP') {
-  return name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase();
+  return String(name).split(/\s+/).filter(Boolean).map((part) => part[0]).join('').slice(0, 2).toUpperCase() || 'UP';
+}
+
+function displayValue(value: unknown, fallback = '—') {
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (value && typeof value === 'object') {
+    const record = value as { globalName?: unknown; username?: unknown; name?: unknown; id?: unknown };
+    for (const candidate of [record.globalName, record.username, record.name, record.id]) {
+      if (typeof candidate === 'string' && candidate.trim()) return candidate;
+    }
+  }
+  return fallback;
 }
 
 function relativeTime(value?: string) {
@@ -258,7 +269,7 @@ function EventRow({ event }: { event: ActivityEvent }) {
   const eventIcon = event.type === 'ticket' ? TicketIcon : event.type === 'moderation' ? ShieldAlert : event.type === 'member' ? Users : event.type === 'settings' ? Settings2 : Bot;
   const Icon = eventIcon;
   const tone = event.severity === 'critical' ? 'text-destructive bg-destructive/10' : event.severity === 'warning' ? 'text-accent bg-accent/10' : event.severity === 'positive' ? 'text-primary bg-primary/10' : 'text-chart-3 bg-chart-3/10';
-  return <div className="group flex gap-3 border-b border-card-border/70 px-5 py-4 last:border-0" data-testid={`row-activity-${event.id}`}><div className={`mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-sm ${tone}`}><Icon className="size-4" /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><p className="truncate text-xs font-bold">{event.title}</p><span className="mono-font shrink-0 text-[9px] text-muted-foreground">{relativeTime(event.occurredAt)}</span></div><p className="mt-1 truncate text-[11px] text-muted-foreground">{event.detail}</p><p className="mt-2 text-[10px] text-muted-foreground/65">by <span className="text-foreground/70">{event.actor}</span></p></div></div>;
+  return <div className="group flex gap-3 border-b border-card-border/70 px-5 py-4 last:border-0" data-testid={`row-activity-${displayValue(event.id, 'activity')}`}><div className={`mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-sm ${tone}`}><Icon className="size-4" /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><p className="truncate text-xs font-bold">{displayValue(event.title, 'Activity update')}</p><span className="mono-font shrink-0 text-[9px] text-muted-foreground">{relativeTime(event.occurredAt)}</span></div><p className="mt-1 truncate text-[11px] text-muted-foreground">{displayValue(event.detail)}</p><p className="mt-2 text-[10px] text-muted-foreground/65">by <span className="text-foreground/70">{displayValue(event.actor, 'UPCore Bot')}</span></p></div></div>;
 }
 
 function Home() {
@@ -267,7 +278,7 @@ function Home() {
   const activityQuery = useGetDashboardActivity({ ...guildParams, limit: 8 }, { query: { queryKey: getGetDashboardActivityQueryKey({ ...guildParams, limit: 8 }), refetchInterval: 30000 } });
   const healthQuery = useBotHealth(guildParams, { query: { queryKey: getBotHealthQueryKey(guildParams), refetchInterval: 30000 } });
   const summary = summaryQuery.data as DashboardSummary | undefined;
-  const activity = (activityQuery.data as ActivityEvent[] | undefined) ?? [];
+  const activity = Array.isArray(activityQuery.data) ? activityQuery.data as ActivityEvent[] : [];
   const guildName = summary?.guildName ?? 'UPCore Esports';
   return <Shell><PageHeader eyebrow="Live operations / 00:00 UTC" title={<>Command<br /><span className="text-primary">center.</span></>} detail={`A live pulse of ${guildName}. Keep the queue moving, catch the edge cases, and stay ahead of your community.`} action={<div className="flex items-center gap-2 rounded-sm border border-primary/20 bg-primary/5 px-3 py-2.5"><span className="flex size-2 rounded-full bg-primary pulse-dot" /><span className="mono-font text-[10px] uppercase tracking-[.14em] text-primary">Live connection</span><span className="text-[10px] text-muted-foreground">{healthQuery.data?.status ?? 'checking'}</span></div>} />
     <div className="space-y-5">
