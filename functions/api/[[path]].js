@@ -43,6 +43,10 @@ export async function onRequest(context) {
 
   const requestHeaders = new Headers(context.request.headers);
   requestHeaders.delete('host');
+  // The Pages runtime may transparently decompress an upstream response
+  // before returning it. Ask Render for an uncompressed response so the
+  // browser never receives a body whose Content-Encoding no longer matches.
+  requestHeaders.set('accept-encoding', 'identity');
 
   const upstreamResponse = await fetch(upstreamUrl, {
     method,
@@ -56,6 +60,13 @@ export async function onRequest(context) {
   });
 
   const responseHeaders = new Headers(upstreamResponse.headers);
+
+  // These hop-by-hop/body-size headers belong to the upstream connection.
+  // Keeping them while returning a new Response can make browser fetch()
+  // wait for bytes that the Pages runtime has already decoded or removed.
+  responseHeaders.delete('content-encoding');
+  responseHeaders.delete('content-length');
+  responseHeaders.delete('transfer-encoding');
 
   const setCookies = getSetCookies(upstreamResponse.headers);
 
