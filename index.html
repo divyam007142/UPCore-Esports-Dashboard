@@ -33,8 +33,8 @@
           state.style.textAlign = 'center';
           state.style.padding = '24px';
         };
-        window.addEventListener('error', showStartupError);
-        window.addEventListener('unhandledrejection', showStartupError);
+        // Only report a true module/bootstrap failure. React removes this
+        // element once it mounts; API errors are rendered by the app itself.
         window.setTimeout(showStartupError, 10000);
       })();
     </script>
