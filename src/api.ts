@@ -251,11 +251,13 @@ async function request<T>(path: string, demo: () => T, init?: RequestInit): Prom
   // Adding content-type to a GET makes the browser send a CORS preflight.
   // Only mutating requests with a JSON body need this header.
   if (init?.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
+  if (!headers.has('accept')) headers.set('accept', 'application/json');
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), requestTimeoutMs);
   try {
     const response = await fetch(`${apiBase}${path}`, {
       credentials: 'include',
+      cache: 'no-store',
       ...init,
       headers,
       signal: init?.signal ?? controller.signal,
