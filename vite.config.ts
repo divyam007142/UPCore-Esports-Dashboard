@@ -4,14 +4,18 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  base: './',
+  // Cloudflare Pages serves this app from the domain root. Absolute build
+  // paths keep assets working even if a nested URL such as /auth/me is opened.
+  base: '/',
   build: {
     outDir: 'dist',
     emptyOutDir: true,
   },
   server: {
     host: '0.0.0.0',
-    port: 5173,
+    port: Number(process.env.PORT || 8080),
+    strictPort: true,
+    allowedHosts: true,
     proxy: {
       '/api': {
         target: 'https://upcore-api-proxy.onrender.com',
